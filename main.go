@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -11,6 +12,7 @@ import (
 
 var userMap map[string]string
 var channelMap map[string]string
+var dryRun bool
 
 func getChannelMap(api *slack.Client) (map[string]string, error) {
 	log.Infof("Getting channel ID <=> Name mapping")
@@ -33,7 +35,7 @@ func getChannelMap(api *slack.Client) (map[string]string, error) {
 
 		for _, channel := range channels {
 			channelMap[channel.Name] = channel.ID
-			log.Infof("Got channel '%s' (%s)", channel.Name, channel.ID)
+			log.Debugf("Got channel '%s' (%s)", channel.Name, channel.ID)
 		}
 	}
 	return channelMap, nil
@@ -48,19 +50,20 @@ func getUserMap(api *slack.Client) (map[string]string, error) {
 	}
 
 	for _, user := range users {
-		log.Infof("Got user '%s' (%s)", user.Name, user.ID)
+		log.Debugf("Got user '%s' (%s)", user.Name, user.ID)
 		userMap[user.Name] = user.ID
 	}
 	return userMap, nil
 }
 
 func leaveChannel(api *slack.Client, self, channel string) {
-	log.Infof("Having %s (%s) leave channel %s (%s)", self, userMap[self], channel, channelMap[channel])
-	_, err := api.LeaveConversation(channelMap[channel])
-	if err != nil {
-		log.Fatalf("Error leaving channel: %#v", err)
+	log.Debugf("Having %s (%s) leave channel %s (%s)", self, userMap[self], channel, channelMap[channel])
+	if !dryRun {
+		_, err := api.LeaveConversation(channelMap[channel])
+		if err != nil {
+			log.Fatalf("Error leaving channel: %#v", err)
+		}
 	}
-
 }
 
 func inviteUsersToChannel(api *slack.Client, self string, channel string, users []string) error {
@@ -76,7 +79,7 @@ func inviteUsersToChannel(api *slack.Client, self string, channel string, users 
 	for _, u := range usersInChannel {
 		if u == userMap[self] {
 			foundSelf = true
-			log.Infof("User %s (%s) is already in the channel %s (%s)", self, userMap[self], channel, channelMap[channel])
+			log.Debugf("User %s (%s) is already in the channel %s (%s)", self, userMap[self], channel, channelMap[channel])
 			break
 		}
 	}
@@ -88,13 +91,13 @@ func inviteUsersToChannel(api *slack.Client, self string, channel string, users 
 		foundUser := false
 		for _, u := range usersInChannel {
 			if userMap[user] == u {
-				log.Infof("Found user %s (%s) in channel %s (%s)", user, userMap[user], channel, channelMap[channel])
+				log.Debugf("Found user %s (%s) in channel %s (%s)", user, userMap[user], channel, channelMap[channel])
 				foundUser = true
 				break
 			}
 		}
 		if !foundUser {
-			log.Infof("No user %s (%s) in channel %s (%s)", user, userMap[user], channel, channelMap[channel])
+			log.Debugf("No user %s (%s) in channel %s (%s)", user, userMap[user], channel, channelMap[channel])
 			newUsers = append(newUsers, userMap[user])
 			if logString == "" {
 				logString = fmt.Sprintf("%s (%s)", user, userMap[user])
@@ -105,24 +108,29 @@ func inviteUsersToChannel(api *slack.Client, self string, channel string, users 
 	}
 
 	if len(newUsers) == 0 {
-		log.Info("No users to invite.")
+		log.Infof("No users to invite to channel %s.", channel)
 		return nil
 	}
 
 	// Invite the users
 	if !foundSelf {
-		log.Infof("Inviting %s to join channel %s (%s)", logString, channel, channelMap[channel])
-		_, _, _, err := api.JoinConversation(channelMap[channel])
-		if err != nil {
-			return err
+		log.Debugf("Inviting %s to join channel %s (%s)", self, channel, channelMap[channel])
+		if !dryRun {
+			_, _, _, err := api.JoinConversation(channelMap[channel])
+			if err != nil {
+				return err
+			}
 		}
 		defer leaveChannel(api, self, channel)
 	}
 
 	usersString := strings.Join(newUsers, ",")
-	_, err := api.InviteUsersToConversation(channelMap[channel], usersString)
-	if err != nil {
-		return err
+	log.Infof("Inviting %s to join channel %s (%s)", logString, channel, channelMap[channel])
+	if !dryRun {
+		_, err := api.InviteUsersToConversation(channelMap[channel], usersString)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -136,12 +144,28 @@ func getEnvVar(name string) string {
 	return value
 }
 
-func main() {
+func remove(slice []string, s int) []string {
+	return append(slice[:s], slice[s+1:]...)
+}
 
+func main() {
+	dryRun = false
+	param := os.Args[1]
+	if param == "-d" || param == "--dry-run" {
+		dryRun = true
+	}
 	// Make sure our environment variables are set
 	slackToken := getEnvVar("SLACK_TOKEN")
 	slackChannelUsersString := getEnvVar("SLACK_CHANNEL_USERS")
 	slackChannelString := getEnvVar("SLACK_CHANNELS")
+	verbose := os.Getenv("INVITER_VERBOSE")
+
+	if verbose == "true" || verbose == "yes" {
+		log.Infof("Setting logging to verbose mode")
+		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.InfoLevel)
+	}
 
 	api := slack.New(
 		slackToken,
@@ -168,10 +192,23 @@ func main() {
 	// Make sure each channel that we're trying to manipulate actually exists
 	var slackChannels []string
 	for _, channel := range strings.Split(slackChannelString, ",") {
+		found := false
 		if _, ok := channelMap[channel]; ok {
+			found = true
 			slackChannels = append(slackChannels, channel)
-		} else {
-			log.Fatalf("%s is not a valid channel.", channel)
+		}
+		if !found {
+			log.Debugf("Exact match not found, searching for a pattern match with %s", channel)
+			re := regexp.MustCompile(channel)
+			for existingChannel, _ := range channelMap {
+				if re.MatchString(existingChannel) {
+					found = true
+					slackChannels = append(slackChannels, existingChannel)
+				}
+			}
+		}
+		if !found {
+			log.Fatalf("%s is not a valid channel nor does it pattern match any channels.", channel)
 		}
 	}
 

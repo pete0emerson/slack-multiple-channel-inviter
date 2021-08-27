@@ -20,6 +20,9 @@ Capture the `Bot User OAuth Token` from https://api.slack.com/apps/ (choose your
 Prior to running this script, export the following environment variables:
 
 ```
+# Set the verbosity of the output if you want to
+export INVITER_VERBOSE=true
+
 # The Bot User OAuth Toekn
 export SLACK_TOKEN=
 
@@ -37,5 +40,10 @@ go build
 export SLACK_TOKEN=xoxb-...
 export SLACK_CHANNEL_USERS=alice,bob,charlie,dawn
 export SLACK_CHANNELS=random,memes,sales
+
+# Show what will happen, but don't actually do it
+./slack-channel-inviter --dry-run
+
+# Make it happen!
 ./slack-channel-inviter
 ```
