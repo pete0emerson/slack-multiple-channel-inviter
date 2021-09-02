@@ -150,9 +150,11 @@ func remove(slice []string, s int) []string {
 
 func main() {
 	dryRun = false
-	param := os.Args[1]
-	if param == "-d" || param == "--dry-run" {
-		dryRun = true
+	if len(os.Args) > 1 {
+		param := os.Args[1]
+		if param == "-d" || param == "--dry-run" {
+			dryRun = true
+		}
 	}
 	// Make sure our environment variables are set
 	slackToken := getEnvVar("SLACK_TOKEN")
