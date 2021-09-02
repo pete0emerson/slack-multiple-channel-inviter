@@ -4,7 +4,33 @@ This golang code invites multiple people to multiple channels.
 
 It uses the https://github.com/slack-go/slack library.
 
-You'll need to create a Slack app first, with the following permissions:
+You'll need to create a Slack app first.
+
+https://api.slack.com/apps/
+
+* Create New App
+* From scratch
+* Name something like "ChannelInviter" && Pick a workspace && Create App
+* Basic Information -> Add features and functionality
+	* Bots
+	* Review Scopes to Add
+	* Scopes -> Add an OAuth Scope
+
+```
+channels:join
+channels:manage
+channels:read
+groups:read
+groups:write
+users:read
+```
+
+	* scroll up to OAuth Tokens for Your Workspace
+		* Install to Workspace
+		* Capture the "Bot User OAuth Token" for use with this code
+
+
+
 
 ```
 channels:join
